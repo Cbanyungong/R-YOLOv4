@@ -1,3 +1,3 @@
 # hi
 
-print('hi ni ma')
+print('trump plays trum and get dumped')
