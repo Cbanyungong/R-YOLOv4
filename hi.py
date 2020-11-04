@@ -1,8 +1,4 @@
 
 # hi
 
-
-list = ["no", "yes"]
-=======
-"big boob"
-
+print('ji ba ren')
