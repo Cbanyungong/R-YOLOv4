@@ -1,4 +1,4 @@
 # hi
 
 
-list = ["no"]
+list = ["no", "yes"]
