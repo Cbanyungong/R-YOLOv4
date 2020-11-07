@@ -1,5 +1,8 @@
 # Yolo精v4液
 
+Weights我放在這：
+[Google Drive](https://drive.google.com/drive/u/1/folders/1KgKY3j66GQnpGVUAbdw7-tNgHxCPDT_F)
+
 我程式碼參考這些：
 [yolov3](https://github.com/eriklindernoren/PyTorch-YOLOv3)
 [yolov4](https://github.com/Tianxiaomo/pytorch-YOLOv4/tree/4ccef0ec8fe984e059378813e33b3740929e0c19)
@@ -152,4 +155,6 @@ def nms(boxes, confs, nms_thresh=0.5):
 
 
 好了，最後找出合格的bounding box後，根據這些點把框框畫出來就行了。
+最後就剩下要怎麼train了，這個影片有講到怎麼寫Loss但是他是用Yolo1來講的[this](https://www.youtube.com/watch?v=n9_XyCGr-MI)
 有不懂都可以馬上問我。
+
