@@ -51,7 +51,7 @@ def post_processing(conf_thresh, nms_thresh, output):
                 for k in range(bbox.shape[0]):
                     bboxes.append([bbox[k, 0], bbox[k, 1], bbox[k, 2], bbox[k, 3], confs[k], label[k]])
 
-        bboxes_batch.extend(bboxes)
+        bboxes_batch.append(bboxes)
 
     return bboxes_batch
 
@@ -86,22 +86,24 @@ if __name__ == "__main__":
 
     start = time.time()
     for img_path, img in dataloader:
-        temp = time.time()
         img = torch.autograd.Variable(img.type(FloatTensor))
-        temp1 = time.time()
 
         with torch.no_grad():
+            temp = time.time()
             output = model(img)
-            temp2 = time.time()
+            temp1 = time.time()
             box = post_processing(args.conf_thres, args.nms_thres, output)
-            temp3 = time.time()
-            boxes.append(box)
+            temp2 = time.time()
+            boxes.extend(box)
             print('-----------------------------------')
-            print("{}-> {} objects found".format(img_path[0].split('/')[-1], len(box)))
-            print("Pre-processing time : ", round(temp1 - temp, 5))
-            print("Inference time : ", round(temp2 - temp1, 5))
-            print("Post-processing time : ", round(temp3 - temp, 5))
+            num = 0
+            for b in box:
+                num += len(b)
+            print("{}-> {} objects found".format(img_path, num))
+            print("Inference time : ", round(temp1 - temp, 5))
+            print("Post-processing time : ", round(temp2 - temp1, 5))
             print('-----------------------------------')
+
         imgs.extend(img_path)
 
     for i, (img_path, box) in enumerate(zip(imgs, boxes)):
