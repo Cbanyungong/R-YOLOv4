@@ -319,7 +319,7 @@ class Yolov4Head(nn.Module):
 
 
 class Yolo(nn.Module):
-    def __init__(self, yolov4conv137weight=None, n_classes=80, inference=False):
+    def __init__(self, n_classes=80, inference=False):
         super().__init__()
 
         output_ch = (4 + 1 + n_classes) * 3
@@ -334,17 +334,6 @@ class Yolo(nn.Module):
 
         # neck
         self.neek = Neck(inference)
-        # yolov4conv137
-        if yolov4conv137weight:
-            _model = nn.Sequential(self.down1, self.down2, self.down3, self.down4, self.down5, self.neek)
-            pretrained_dict = torch.load(yolov4conv137weight)
-
-            model_dict = _model.state_dict()
-            # 1. filter out unnecessary keys
-            pretrained_dict = {k1: v for (k, v), k1 in zip(pretrained_dict.items(), model_dict)}
-            # 2. overwrite entries in the existing state dict
-            model_dict.update(pretrained_dict)
-            _model.load_state_dict(model_dict)
 
         # head
         self.head = Yolov4Head(output_ch, n_classes, inference)

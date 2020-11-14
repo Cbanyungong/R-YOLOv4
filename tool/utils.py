@@ -13,15 +13,14 @@ def get_color(c, x, max_val):
     return int(r * 255)
 
 
-def plot_boxes_cv2(img, boxes, savename=None, class_names=None, color=None):
+def plot_boxes(img_path, boxes, class_names, color=None):
     import cv2
-    img = np.copy(img)
+    img = np.array(cv2.imread(img_path))
 
     width = img.shape[1]
     height = img.shape[0]
     for i in range(len(boxes)):
         box = boxes[i]
-        print(box)
         x1 = int(box[0] * width)
         y1 = int(box[1] * height)
         x2 = int(box[2] * width)
@@ -32,9 +31,7 @@ def plot_boxes_cv2(img, boxes, savename=None, class_names=None, color=None):
         else:
             rgb = (255, 0, 0)
 
-        cls_conf = box[4]
         cls_id = box[5]
-        print('%s: %f' % (class_names[cls_id], cls_conf))
         classes = len(class_names)
         offset = cls_id * 123457 % classes
         red = get_color(2, offset, classes)
@@ -44,10 +41,9 @@ def plot_boxes_cv2(img, boxes, savename=None, class_names=None, color=None):
             rgb = (red, green, blue)
         img = cv2.putText(img, class_names[cls_id], (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1.2, rgb, 1)
         img = cv2.rectangle(img, (x1, y1), (x2, y2), rgb, 1)
-    if savename:
-        print("save plot results to %s" % savename)
-        cv2.imwrite(savename, img)
-    return img
+
+    output_path = "outputs/" + img_path.split('/')[-1]
+    cv2.imwrite(output_path, img)
 
 
 def load_class_names(namesfile):

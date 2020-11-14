@@ -1,175 +1,114 @@
 import torch
 import time
+import argparse
 import numpy as np
-from tool.utils import load_class_names, plot_boxes_cv2
+from torch.utils.data import DataLoader
+from tool.utils import load_class_names, plot_boxes
 from tool.yolo import nms
+from load import ImageFolder
 from model import Yolo
 
 
 def post_processing(conf_thresh, nms_thresh, output):
-    # anchors = [12, 16, 19, 36, 40, 28, 36, 75, 76, 55, 72, 146, 142, 110, 192, 243, 459, 401]
-    # num_anchors = 9
-    # anchor_masks = [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
-    # strides = [8, 16, 32]
-    # anchor_step = len(anchors) // num_anchors
-
     # 416 / 8, 16, 32 -> 52, 26, 13
-    # [batch,  ((52 x 52) + (26 x 26) + 13 x 13)) x 3, 1, 4]
-    box_array = output[0]
-
-    # [batch,  ((52 x 52) + (26 x 26) + 13 x 13)) x 3, num_classes]
-    confs = output[1]
-
-    t1 = time.time()
-
-    if type(box_array).__name__ != 'ndarray':  # torch.Tensor
-        box_array = box_array.cpu().detach().numpy()
-        confs = confs.cpu().detach().numpy()
-
-    # [batch,  ((52 x 52) + (26 x 26) + 13 x 13)) x 3, 4]
-    box_array = box_array[:, :, 0]
+    # box_array.shape-> [batch,  ((52 x 52) + (26 x 26) + 13 x 13)) x 3, 4]
+    # confs.shape-> [batch,  ((52 x 52) + (26 x 26) + 13 x 13)) x 3, num_classes]
+    box_array, confs = output[0].detach().cpu().numpy(), output[1].detach()
 
     # [batch, num, num_classes] --> [batch, num]
-    max_conf = np.max(confs, axis=2)
-    max_id = np.argmax(confs, axis=2)
-
-    t2 = time.time()
+    # torch.max returns a namedtuple (values, indices) where values is the maximum value of each row of the
+    # input tensor in the given dimension dim. And indices is the index location of each maximum value found (argmax).
+    max_conf, max_id = torch.max(confs, dim=2, keepdim=True)
+    max_conf, max_id = max_conf.cpu().numpy(), max_id.cpu().numpy()
 
     bboxes_batch = []
     for i in range(box_array.shape[0]):
 
-        # 1.Thresholding by Object Confidence
-        # First, we filter boxes based on their objectness score.
-        # Generally, boxes having scores below a threshold are ignored.
-        argwhere = max_conf[i] > conf_thresh
-        l_box_array = box_array[i, argwhere, :]
-        l_max_conf = max_conf[i, argwhere]
-        l_max_id = max_id[i, argwhere]
-        l_max_id_list = list(set(l_max_id))
-
-        print(l_max_id)
-        print(l_max_id_list)
+        # Thresholding by Object Confidence
+        # squeeze的原因是要讓shape-> (n, 1) 變成 shape-> (n)
+        argwhere = np.squeeze(max_conf[i] > conf_thresh)
+        box_candidate = box_array[i, argwhere, :]  # 信心值有大於門檻的bounding box
+        confs_candidate = max_conf[i, argwhere]  # 這些bounding box的信心值
+        classes_label = max_id[i, argwhere]  # 這些bounding box對應到的label
+        classes = np.unique(classes_label)
 
         bboxes = []
         # nms for candidate classes
-        for j in l_max_id_list:
+        for j in classes:
 
-            cls_argwhere = l_max_id == j
-            ll_box_array = l_box_array[cls_argwhere, :]
-            ll_max_conf = l_max_conf[cls_argwhere]
-            ll_max_id = l_max_id[cls_argwhere]
+            cls_argwhere = np.squeeze(classes_label == j)
+            bbox = box_candidate[cls_argwhere, :]
+            confs = np.squeeze(confs_candidate[cls_argwhere])
+            label = np.squeeze(classes_label[cls_argwhere])
 
-            keep = nms(ll_box_array, ll_max_conf, nms_thresh)
+            keep = nms(bbox, confs, nms_thresh)
 
-            if (keep.size > 0):
-                ll_box_array = ll_box_array[keep, :]
-                ll_max_conf = ll_max_conf[keep]
-                ll_max_id = ll_max_id[keep]
+            if keep.size > 0:
+                bbox = bbox[keep, :]
+                confs = confs[keep]
+                label = label[keep]
 
-                for k in range(ll_box_array.shape[0]):
-                    bboxes.append(
-                        [ll_box_array[k, 0], ll_box_array[k, 1], ll_box_array[k, 2], ll_box_array[k, 3],
-                         ll_max_conf[k], ll_max_id[k]])
+                for k in range(bbox.shape[0]):
+                    bboxes.append([bbox[k, 0], bbox[k, 1], bbox[k, 2], bbox[k, 3], confs[k], label[k]])
 
-        bboxes_batch.append(bboxes)
+        bboxes_batch.extend(bboxes)
 
-    t3 = time.time()
-
-    print('-----------------------------------')
-    print('       max and argmax : %f' % (t2 - t1))
-    print('                  nms : %f' % (t3 - t2))
-    print('Post processing total : %f' % (t3 - t1))
-    print('-----------------------------------')
-
-    print(bboxes_batch)
     return bboxes_batch
 
 
-def do_detect(model, img, conf_thresh, nms_thresh, use_cuda=1):
-    model.eval()
-    t0 = time.time()
-
-    if type(img) == np.ndarray and len(img.shape) == 3:  # cv2 image
-        img = torch.from_numpy(img.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0)
-    elif type(img) == np.ndarray and len(img.shape) == 4:
-        img = torch.from_numpy(img.transpose(0, 3, 1, 2)).float().div(255.0)
-    else:
-        print("unknow image type")
-        exit(-1)
-
-    if use_cuda:
-        img = img.cuda()
-    img = torch.autograd.Variable(img)
-
-    t1 = time.time()
-
-    output = model(img)
-
-    t2 = time.time()
-
-    print('-----------------------------------')
-    print('           Preprocess : %f' % (t1 - t0))
-    print('      Model Inference : %f' % (t2 - t1))
-    print('-----------------------------------')
-
-    return post_processing(conf_thresh, nms_thresh, output)
-
-
 if __name__ == "__main__":
-    import sys
-    import cv2
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--image_folder", type=str, default="data/img", help="path to dataset")
+    parser.add_argument("--weights_path", type=str, default="weights/myyolo.pth", help="path to weights file")
+    parser.add_argument("--class_path", type=str, default="data/coco.names", help="path to class label file")
+    parser.add_argument("--conf_thres", type=float, default=0.4, help="object confidence threshold")
+    parser.add_argument("--nms_thres", type=float, default=0.5, help="iou thresshold for non-maximum suppression")
+    parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
+    parser.add_argument("--img_size", type=int, default=416, help="size of each image dimension")
+    args = parser.parse_args()
 
-    namesfile = None
-    if len(sys.argv) == 6:
-        n_classes = int(sys.argv[1])
-        weightfile = sys.argv[2]
-        imgfile = sys.argv[3]
-        height = int(sys.argv[4])
-        width = int(sys.argv[5])
-    elif len(sys.argv) == 7:
-        n_classes = int(sys.argv[1])
-        weightfile = sys.argv[2]
-        imgfile = sys.argv[3]
-        height = sys.argv[4]
-        width = int(sys.argv[5])
-        namesfile = int(sys.argv[6])
-    else:
-        print('Usage: ')
-        print('  python models.py num_classes weightfile imgfile namefile')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 
-    model = Yolo(yolov4conv137weight=None, n_classes=n_classes, inference=True)
-
-    pretrained_dict = torch.load(weightfile)
+    class_names = load_class_names(args.class_path)
+    pretrained_dict = torch.load(args.weights_path)
+    model = Yolo(n_classes=80, inference=True)
+    model = model.to(device)
     model.load_state_dict(pretrained_dict)
 
-    """
-    use_cuda = True
-    if use_cuda:
-        model.cuda()
-    """
+    model.eval()
 
-    img = cv2.imread(imgfile)
-    if img is None:
-        print("Can't load image")
-        exit(1)
+    dataset = ImageFolder(args.image_folder, img_size=args.img_size)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
-    # Inference input size is 416*416 does not mean training size is the same
-    # Training size could be 608*608 or even other sizes
-    # Optional inference sizes:
-    #   Hight in {320, 416, 512, 608, ... 320 + 96 * n}
-    #   Width in {320, 416, 512, 608, ... 320 + 96 * m}
-    sized = cv2.resize(img, (width, height))
-    sized = cv2.cvtColor(sized, cv2.COLOR_BGR2RGB)
+    boxes = []
+    imgs = []
 
-    boxes = do_detect(model, sized, 0.4, 0.5, use_cuda=False)
+    start = time.time()
+    for img_path, img in dataloader:
+        temp = time.time()
+        img = torch.autograd.Variable(img.type(FloatTensor))
+        temp1 = time.time()
 
-    if namesfile == None:
-        if n_classes == 20:
-            namesfile = 'data/voc.names'
-        elif n_classes == 80:
-            namesfile = 'data/coco.names'
-        else:
-            print("please give namefile")
+        with torch.no_grad():
+            output = model(img)
+            temp2 = time.time()
+            box = post_processing(args.conf_thres, args.nms_thres, output)
+            temp3 = time.time()
+            boxes.append(box)
+            print('-----------------------------------')
+            print("{}-> {} objects found".format(img_path[0].split('/')[-1], len(box)))
+            print("Pre-processing time : ", round(temp1 - temp, 5))
+            print("Inference time : ", round(temp2 - temp1, 5))
+            print("Post-processing time : ", round(temp3 - temp, 5))
+            print('-----------------------------------')
+        imgs.extend(img_path)
 
-    class_names = load_class_names(namesfile)
-    plot_boxes_cv2(img, boxes[0], 'predictions.jpg', class_names)
+    for i, (img_path, box) in enumerate(zip(imgs, boxes)):
+        plot_boxes(img_path, box, class_names)
+
+    end = time.time()
+
+    print('-----------------------------------')
+    print("Total detecting time : ", round(end - start, 5))
+    print('-----------------------------------')

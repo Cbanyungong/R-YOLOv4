@@ -34,33 +34,29 @@ def iou(box1, box2):
         return 0.0
 
     inter_area = interX * interY
-    union_area = (t1_x2 - t1_x1) * (t1_y2 - t1_y1) + (t2_x2 - t2_x1) * (t2_y2 - t2_y1) - inter_area
+    union_area = (t1_x2 - t1_x1) * (t1_y2 - t1_y1) + (t2_x2 - t2_x1) * (t2_y2 - t2_y1) - inter_area + 1e-16
 
     return inter_area / union_area
 
 
 def nms(boxes, confs, nms_thresh=0.5):
-    dict_of_box = []
     order = np.argsort(confs)
-    boxes = boxes[order]
-    for i in range(len(order)):
-        dict_of_box.append(tuple([order[i], boxes[i]]))
 
     # nms algorithm
     keep = []
-    while len(dict_of_box) > 0:
-        box = dict_of_box.pop()
+    while len(order) > 0:
+        first_box_index, order = order[-1], order[:-1]
+        box = boxes[first_box_index]
 
         # box looks like-> [(0, array([0.18615767, 0.22766608, 0.748049  , 0.7332627 ], dtype=float32)),
         #                   (1, array([0.19176558, 0.23242362, 0.73947287, 0.7266734 ], dtype=float32)), ...
-        keep.append(box[0])
+        keep.append(first_box_index)
+        box_order_that_can_be_kept = []
+        for b in order:
+            if iou(box, boxes[b]) < nms_thresh:
+                box_order_that_can_be_kept.append(b)
 
-        box_that_can_be_kept = []
-        for b in dict_of_box:
-            if iou(box[1], b[1]) < nms_thresh:
-                box_that_can_be_kept.append(b)
-
-        dict_of_box = box_that_can_be_kept
+        order = box_order_that_can_be_kept
 
     return np.array(keep)
 
@@ -97,8 +93,7 @@ def yolo_forward(output, num_classes, anchors, num_anchors, scale_x_y):
     # grid.shape-> [1, 1, 52, 52, 1]
     # 預測出來的(x, y)是相對於每個cell左上角的點，因此這邊需要由左上角往右下角配合grid_size加上對應的offset，畫出的圖才會在正確的位置上
     grid_x = torch.arange(grid_size).repeat(grid_size, 1).view([1, 1, grid_size, grid_size, 1]).type(FloatTensor)
-    grid_y = torch.arange(grid_size).repeat(grid_size, 1).t().view([1, 1, grid_size, grid_size, 1]).type(
-        torch.FloatTensor)
+    grid_y = torch.arange(grid_size).repeat(grid_size, 1).t().view([1, 1, grid_size, grid_size, 1]).type(FloatTensor)
 
     # anchor.shape-> [1, 3, 1, 1, 1]
     # 這邊我認為是要從anchors的大小來還原實際上的寬和高
@@ -119,7 +114,7 @@ def yolo_forward(output, num_classes, anchors, num_anchors, scale_x_y):
     by2 = (by + bh * 0.5)
 
     # boxes: [batch, num_anchors, grid_size, grid_size, 4] -> [batch, num_anchors * grid_size * grid_size, 1, 4]
-    boxes = torch.cat((bx1, by1, bx2, by2), dim=4).view(num_samples, num_anchors * grid_size * grid_size, 1, 4)
+    boxes = torch.cat((bx1, by1, bx2, by2), dim=4).view(num_samples, num_anchors * grid_size * grid_size, 4)
 
     # confs: [batch, num_anchors * grid_size * grid_size, num_classes]
     confs = (cls_confs * det_confs).view(num_samples, num_anchors * grid_size * grid_size, num_classes)
@@ -139,6 +134,12 @@ class YoloLayer(nn.Module):
         self.thresh = 0.6
 
     def forward(self, output):
+        # anchors = [12, 16, 19, 36, 40, 28, 36, 75, 76, 55, 72, 146, 142, 110, 192, 243, 459, 401]
+        # num_anchors = 9
+        # anchor_masks = [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
+        # strides = [8, 16, 32]
+        # anchor_step = len(anchors) // num_anchors
+
         anchor_step = len(self.anchors) // self.num_anchors
 
         masked_anchors = []
