@@ -3,17 +3,22 @@ import time
 import argparse
 import numpy as np
 from torch.utils.data import DataLoader
-from tool.utils import load_class_names, plot_boxes
-from tool.yolo import nms
-from load import ImageFolder
-from model import Yolo
+from tools.utils import load_class_names, plot_boxes
+from tools.utils import nms, xywh2xyxy
+from tools.load import ImageFolder
+from model.model import Yolo
 
 
-def post_processing(conf_thresh, nms_thresh, output):
+def post_processing(prediction, conf_thresh, nms_thresh):
     # 416 / 8, 16, 32 -> 52, 26, 13
-    # box_array.shape-> [batch,  ((52 x 52) + (26 x 26) + 13 x 13)) x 3, 4]
-    # confs.shape-> [batch,  ((52 x 52) + (26 x 26) + 13 x 13)) x 3, num_classes]
-    box_array, confs = output[0].detach().cpu().numpy(), output[1].detach()
+    # box_array.shape-> [batch,  ((52 x 52) + (26 x 26) + (13 x 13)) x 3, 4]
+    # confs.shape-> [batch,  ((52 x 52) + (26 x 26) + (13 x 13)) x 3, num_classes]
+    prediction[..., :4] = xywh2xyxy(prediction[..., :4])
+    box_array = prediction[..., :4].detach().cpu().numpy()
+    confs = prediction[..., 4:5].detach() * prediction[..., 5:].detach()
+    batch_size = len(prediction)
+
+    _, test_id = torch.max(prediction[..., 4:5].detach(), dim=1, keepdim=True)
 
     # [batch, num, num_classes] --> [batch, num]
     # torch.max returns a namedtuple (values, indices) where values is the maximum value of each row of the
@@ -22,8 +27,7 @@ def post_processing(conf_thresh, nms_thresh, output):
     max_conf, max_id = max_conf.cpu().numpy(), max_id.cpu().numpy()
 
     bboxes_batch = []
-    for i in range(box_array.shape[0]):
-
+    for i in range(batch_size):
         # Thresholding by Object Confidence
         # squeeze的原因是要讓shape-> (n, 1) 變成 shape-> (n)
         argwhere = np.squeeze(max_conf[i] > conf_thresh)
@@ -35,11 +39,10 @@ def post_processing(conf_thresh, nms_thresh, output):
         bboxes = []
         # nms for candidate classes
         for j in classes:
-
-            cls_argwhere = np.squeeze(classes_label == j)
+            cls_argwhere = np.squeeze(classes_label == j, axis=1)  # axis=1 lets [[True]] -> [True] instead of -> True
             bbox = box_candidate[cls_argwhere, :]
-            confs = np.squeeze(confs_candidate[cls_argwhere])
-            label = np.squeeze(classes_label[cls_argwhere])
+            confs = confs_candidate[cls_argwhere]
+            label = classes_label[cls_argwhere]
 
             keep = nms(bbox, confs, nms_thresh)
 
@@ -59,7 +62,7 @@ def post_processing(conf_thresh, nms_thresh, output):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_folder", type=str, default="data/img", help="path to dataset")
-    parser.add_argument("--weights_path", type=str, default="weights/myyolo.pth", help="path to weights file")
+    parser.add_argument("--weights_path", type=str, default="weights/myyolo2.pth", help="path to weights file")
     parser.add_argument("--class_path", type=str, default="data/coco.names", help="path to class label file")
     parser.add_argument("--conf_thres", type=float, default=0.4, help="object confidence threshold")
     parser.add_argument("--nms_thres", type=float, default=0.5, help="iou thresshold for non-maximum suppression")
@@ -71,8 +74,8 @@ if __name__ == "__main__":
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 
     class_names = load_class_names(args.class_path)
-    pretrained_dict = torch.load(args.weights_path)
-    model = Yolo(n_classes=80, inference=True)
+    pretrained_dict = torch.load(args.weights_path, map_location=torch.device('cpu'))
+    model = Yolo(n_classes=80)
     model = model.to(device)
     model.load_state_dict(pretrained_dict)
 
@@ -90,9 +93,9 @@ if __name__ == "__main__":
 
         with torch.no_grad():
             temp = time.time()
-            output = model(img)
+            output, _ = model(img)  # batch=1 -> [1, n, n], batch=3 -> [3, n, n]
             temp1 = time.time()
-            box = post_processing(args.conf_thres, args.nms_thres, output)
+            box = post_processing(output, args.conf_thres, args.nms_thres)
             temp2 = time.time()
             boxes.extend(box)
             print('-----------------------------------')
