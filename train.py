@@ -5,11 +5,11 @@ import random
 import numpy as np
 import argparse
 from torch.utils.data import DataLoader
+from torch.autograd import Variable
+from torch.optim.lr_scheduler import LambdaLR
 from tools.utils import load_class_names
 from tools.load import ListDataset
-from torch.autograd import Variable
 from model.model import Yolo
-from torch.optim.lr_scheduler import LambdaLR
 
 
 def create_lr_scheduler(optimizer, epochs):
@@ -17,7 +17,6 @@ def create_lr_scheduler(optimizer, epochs):
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
     lf = lambda x: (((1 + math.cos(x * math.pi / epochs)) / 2) ** 1.0) * 0.9 + 0.1  # cosine
     lr_scheduler = LambdaLR(optimizer, lr_lambda=lf)
-    # plot_lr_scheduler(optimizer, lr_scheduler, configs.num_epochs, save_dir=configs.logs_dir)
 
     return lr_scheduler
 
@@ -30,13 +29,15 @@ def weights_init_normal(m):
         torch.nn.init.constant_(m.bias.data, 0.0)
 
 
-if __name__ == "__main__":
+def init():
     random.seed(42)
     np.random.seed(42)
     torch.manual_seed(42)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--train_folder", type=str, default="data/train", help="path to dataset")
     parser.add_argument("--test_folder", type=str, default="data/test", help="path to dataset")
@@ -47,11 +48,12 @@ if __name__ == "__main__":
     parser.add_argument("--img_size", type=int, default=416, help="size of each image dimension")
     args = parser.parse_args()
 
+    init()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     class_names = load_class_names(args.class_path)
     pretrained_dict = torch.load(args.weights_path)
-    model = Yolo(n_classes=10)
+    model = Yolo(n_classes=1)
     model = model.to(device)
     model_dict = model.state_dict()
 
@@ -79,22 +81,20 @@ if __name__ == "__main__":
         model.train()
         for batch, (_, imgs, targets) in enumerate(train_dataloader):
             global_step = num_iters_per_epoch * (epoch - 1) + batch + 1
-
-            imgs = Variable(imgs.to(device))
+            imgs = Variable(imgs.to(device), requires_grad=True)
             targets = Variable(targets.to(device), requires_grad=False)
 
             outputs, loss = model(imgs, targets)
 
             loss.backward()
 
-            if global_step % 2 == 0:
+            if global_step % 5 == 0:
                 print("update")
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
             log_str = "\n---- [Epoch %d/%d, Batch %d/%d] ----\n" % (epoch, args.epochs, batch, len(train_dataloader))
-
             print(loss)
             print(log_str)
 

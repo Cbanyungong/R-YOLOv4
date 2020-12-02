@@ -3,7 +3,7 @@ from model.model import Yolo
 from collections import OrderedDict
 
 
-model = Yolo(n_classes=80, detect=True)
+model = Yolo(n_classes=80)
 
 pretrained_dict = torch.load("weights/yolov4.pth")
 generator_state_dict = model.state_dict()

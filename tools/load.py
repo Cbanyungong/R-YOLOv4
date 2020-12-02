@@ -1,3 +1,5 @@
+# Reference: https://github.com/eriklindernoren/PyTorch-YOLOv3/blob/master/utils/datasets.py
+
 import glob
 import random
 import os
@@ -5,35 +7,8 @@ import numpy as np
 from PIL import Image
 import torch
 import torch.nn.functional as F
-
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
-
-
-class ImageFolder(Dataset):
-    def __init__(self, folder_path, img_size=416):
-        self.files = sorted(glob.glob("%s/*.*" % folder_path))
-        self.img_size = img_size
-
-    def __len__(self):
-        return len(self.files)
-
-    def __getitem__(self, index):
-        #  Hight in {320, 416, 512, 608, ... 320 + 96 * n}
-        #  Width in {320, 416, 512, 608, ... 320 + 96 * m}
-        img_path = self.files[index % len(self.files)]
-
-        # Extract image as PyTorch tensor
-        img = transforms.ToTensor()(Image.open(img_path))
-        # Pad to square resolution
-        # img, _ = pad_to_square(img, 0)
-        # Resize
-        img = resize(img, self.img_size)
-
-        # transform = transforms.ToPILImage(mode="RGB")
-        # image = transform(img)
-        # image.show()
-        return img_path, img
 
 
 def horisontal_flip(images, targets):
@@ -60,9 +35,34 @@ def resize(image, size):
     return image
 
 
+class ImageFolder(Dataset):
+    def __init__(self, folder_path, img_size=416):
+        self.files = sorted(glob.glob("%s/*.*" % folder_path))
+        self.img_size = img_size
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, index):
+        #  Hight in {320, 416, 512, 608, ... 320 + 96 * n}
+        #  Width in {320, 416, 512, 608, ... 320 + 96 * m}
+        img_path = self.files[index % len(self.files)]
+
+        # Extract image as PyTorch tensor
+        img = transforms.ToTensor()(Image.open(img_path))
+        # Pad to square resolution
+        # img, _ = pad_to_square(img, 0)
+        # Resize
+        img = resize(img, self.img_size)
+        # transform = transforms.ToPILImage(mode="RGB")
+        # image = transform(img)
+        # image.show()
+        return img_path, img
+
+
 class ListDataset(Dataset):
-    def __init__(self, list_path, img_size=416, augment=False, multiscale=False, normalized_labels=True):
-        self.img_files = sorted(glob.glob("%s/*.png" % list_path))
+    def __init__(self, list_path, img_size=416, augment=True, multiscale=True, normalized_labels=True):
+        self.img_files = sorted(glob.glob("%s/*.jpg" % list_path))
 
         self.label_files = [
             path.replace("images", "labels").replace(".png", ".txt").replace(".jpg", ".txt")

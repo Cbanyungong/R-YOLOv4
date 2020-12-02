@@ -1,7 +1,18 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from tools.utils import anchor_wh_iou, bbox_xywh_ciou
+from model.loss import *
+
+
+def anchor_wh_iou(wh1, wh2):
+    """
+    :param wh1: width and height of ground truth boxes
+    :param wh2: width and height of anchor boxes
+    :return: iou
+    """
+    wh2 = wh2.t()
+    w1, h1 = wh1[0], wh1[1]
+    w2, h2 = wh2[0], wh2[1]
+    inter_area = torch.min(w1, w2) * torch.min(h1, h2)
+    union_area = (w1 * h1 + 1e-16) + w2 * h2 - inter_area
+    return inter_area / union_area
 
 
 class YoloLayer(nn.Module):
@@ -46,7 +57,6 @@ class YoloLayer(nn.Module):
         tw = FloatTensor(nB, nA, nG, nG).fill_(0)
         th = FloatTensor(nB, nA, nG, nG).fill_(0)
         tcls = FloatTensor(nB, nA, nG, nG, nC).fill_(0)
-        tconf = obj_mask.float()
 
         # Convert to position relative to box
         pred_boxes = pred_boxes * nG
@@ -64,11 +74,11 @@ class YoloLayer(nn.Module):
         # Set masks
         obj_mask[b, best_n, gj, gi] = 1
         noobj_mask[b, best_n, gj, gi] = 0
+        tconf = obj_mask.float()
 
         # Set noobj mask to zero where iou exceeds ignore threshold
         for i, anchor_ious in enumerate(ious.t()):
             noobj_mask[b[i], anchor_ious > self.ignore_thresh, gj[i], gi[i]] = 0
-
         # Coordinates
         tx[b, best_n, gj, gi] = gx - gx.floor()
         ty[b, best_n, gj, gi] = gy - gy.floor()
@@ -79,11 +89,16 @@ class YoloLayer(nn.Module):
         tcls[b, best_n, gj, gi, target_labels] = 1
         # Compute label correctness and iou at best anchor
         class_mask[b, best_n, gj, gi] = (pred_cls[b, best_n, gj, gi].argmax(-1) == target_labels).float()
-        ious, ciou_loss = bbox_xywh_ciou(pred_boxes[b, best_n, gj, gi], target_boxes)
-        iou_scores[b, best_n, gj, gi] = ious
+
+        iou, ciou_loss = bbox_xywh_ciou(pred_boxes[b, best_n, gj, gi], target_boxes)
+
+        iou_scores[b, best_n, gj, gi] = iou
+        ciou_loss = (1.0 - ciou_loss)
 
         if self.reduction == 'mean':
             ciou_loss = ciou_loss.mean()
+        else:
+            ciou_loss = ciou_loss.sum()
 
         obj_mask = obj_mask.type(torch.bool)
         noobj_mask = noobj_mask.type(torch.bool)
@@ -108,8 +123,8 @@ class YoloLayer(nn.Module):
                   .permute(0, 1, 3, 4, 2).contiguous()
         )
 
-        pred_x = torch.sigmoid(prediction[..., 0]) * self.scale_x_y - 0.5 * (self.scale_x_y - 1)  # ????????
-        pred_y = torch.sigmoid(prediction[..., 1]) * self.scale_x_y - 0.5 * (self.scale_x_y - 1)  # ????????
+        pred_x = torch.sigmoid(prediction[..., 0]) * self.scale_x_y - (self.scale_x_y - 1) / 2
+        pred_y = torch.sigmoid(prediction[..., 1]) * self.scale_x_y - (self.scale_x_y - 1) / 2
         pred_w = prediction[..., 2]
         pred_h = prediction[..., 3]
         pred_conf = torch.sigmoid(prediction[..., 4])
@@ -155,24 +170,28 @@ class YoloLayer(nn.Module):
             loss_w = F.mse_loss(pred_w[obj_mask], tw[obj_mask], reduction=self.reduction)
             loss_h = F.mse_loss(pred_h[obj_mask], th[obj_mask], reduction=self.reduction)
 
-            loss_conf_obj = F.binary_cross_entropy(pred_conf[obj_mask], tconf[obj_mask], reduction=self.reduction)
-            loss_conf_noobj = F.binary_cross_entropy(pred_conf[noobj_mask], tconf[noobj_mask], reduction=self.reduction)
-
-            loss_cls = F.binary_cross_entropy(pred_cls[obj_mask], tcls[obj_mask])
+            #loss_conf_obj = F.binary_cross_entropy(pred_conf[obj_mask], tconf[obj_mask], reduction=self.reduction)
+            #loss_conf_noobj = F.binary_cross_entropy(pred_conf[noobj_mask], tconf[noobj_mask], reduction=self.reduction)
+            FOCAL = FocalLoss(FloatTensor)
+            loss_conf = (
+                    FOCAL(pred_conf[obj_mask], tconf[obj_mask])
+                    + FOCAL(pred_conf[noobj_mask], tconf[noobj_mask])
+            )
+            loss_cls = F.binary_cross_entropy(pred_cls[obj_mask], tcls[obj_mask], reduction=self.reduction)
 
             if self.use_ciou_loss:
-                loss_conf = loss_conf_obj + loss_conf_noobj
+                #loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj
                 total_loss = (
                     self.lambda_ciou_scale * ciou_loss +
-                    self.lambda_conf_scale * loss_conf +
+                    loss_conf +
                     self.lambda_cls_scale * loss_cls
                 )
                 print("{}, {}, {}".format(self.lambda_ciou_scale * ciou_loss,
-                                          self.lambda_conf_scale * loss_conf,
+                                          loss_conf,
                                           self.lambda_cls_scale * loss_cls))
             else:
                 loss_box = self.lambda_coord * (loss_x + loss_y + loss_w + loss_h)
-                loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj
+                #loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj
                 total_loss = loss_box + loss_conf + loss_cls
                 print("{}, {}, {}".format(loss_box, loss_conf, loss_cls))
 
