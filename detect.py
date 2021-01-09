@@ -2,21 +2,21 @@ import torch
 import time
 import argparse
 from torch.utils.data import DataLoader
-from tools.utils import load_class_names, plot_boxes
-from tools.post_process import process
-from tools.load import ImageFolder
+from tools.plot import load_class_names, plot_boxes
+from tools.post_process import post_process
+from tools.load import ImageDataset
 from model.model import Yolo
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--image_folder", type=str, default="data/img", help="path to dataset")
-    parser.add_argument("--weights_path", type=str, default="weights/myyolo2.pth", help="path to weights file")
+    parser.add_argument("--image_folder", type=str, default="data/demo", help="path to dataset")
+    parser.add_argument("--weights_path", type=str, default="weights/AOD_800.pth", help="path to weights file")
     parser.add_argument("--class_path", type=str, default="data/coco.names", help="path to class label file")
-    parser.add_argument("--conf_thres", type=float, default=0.6, help="object confidence threshold")
-    parser.add_argument("--nms_thres", type=float, default=0.7, help="iou thresshold for non-maximum suppression")
+    parser.add_argument("--conf_thres", type=float, default=0.7, help="object confidence threshold")
+    parser.add_argument("--nms_thres", type=float, default=0.2, help="iou thresshold for non-maximum suppression")
     parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
-    parser.add_argument("--img_size", type=int, default=416, help="size of each image dimension")
+    parser.add_argument("--img_size", type=int, default=608, help="size of each image dimension")
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -24,13 +24,13 @@ if __name__ == "__main__":
 
     class_names = load_class_names(args.class_path)
     pretrained_dict = torch.load(args.weights_path, map_location=torch.device('cpu'))
-    model = Yolo(n_classes=1)
+    model = Yolo(n_classes=2)
     model = model.to(device)
     model.load_state_dict(pretrained_dict)
 
     model.eval()
 
-    dataset = ImageFolder(args.image_folder, img_size=args.img_size)
+    dataset = ImageDataset(args.image_folder, img_size=args.img_size)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
     boxes = []
@@ -44,7 +44,7 @@ if __name__ == "__main__":
             temp = time.time()
             output, _ = model(img)  # batch=1 -> [1, n, n], batch=3 -> [3, n, n]
             temp1 = time.time()
-            box = process(output, args.conf_thres, args.nms_thres)
+            box = post_process(output, args.conf_thres, args.nms_thres)
             temp2 = time.time()
             boxes.extend(box)
             print('-----------------------------------')
@@ -59,7 +59,7 @@ if __name__ == "__main__":
         imgs.extend(img_path)
 
     for i, (img_path, box) in enumerate(zip(imgs, boxes)):
-        plot_boxes(img_path, box, class_names)
+        plot_boxes(img_path, box, class_names, args.img_size)
 
     end = time.time()
 

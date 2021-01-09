@@ -1,4 +1,11 @@
+# References: https://github.com/eriklindernoren/PyTorch-YOLOv3/blob/master/models.py
+
 from model.loss import *
+import numpy as np
+
+
+def to_cpu(tensor):
+    return tensor.detach().cpu()
 
 
 def anchor_wh_iou(wh1, wh2):
@@ -16,35 +23,33 @@ def anchor_wh_iou(wh1, wh2):
 
 
 class YoloLayer(nn.Module):
-    def __init__(self, num_classes, anchors, stride, scale_x_y, ignore_thresh):
+    def __init__(self, num_classes, anchors, angles, stride, scale_x_y, ignore_thresh):
         super(YoloLayer, self).__init__()
         self.num_classes = num_classes
         self.anchors = anchors
-        self.num_anchors = len(anchors)
+        self.angles = angles
+        self.num_anchors = len(anchors) * len(angles)
         self.stride = stride
         self.scale_x_y = scale_x_y
         self.ignore_thresh = ignore_thresh
-        # mask_anchors :
-        # [1.5, 2.0, 2.375, 4.5, 5.0, 3.5],  as stride = 8
-        # [2.25, 4.6875, 4.75, 3.4375, 4.5, 9.125],  as stride = 16
-        # [4.4375, 3.4375, 6.0, 7.59375, 14.34375, 12.53125],  as stride = 32
-        self.masked_anchors = [(a_w / self.stride, a_h / self.stride) for a_w, a_h in self.anchors]
+        # ---------------------------------------------------------------------
+        # ------------------------ masked anchors size ------------------------
+        # as stride = 8 -> [1.5, 2.0, 2.375, 4.5, 5.0, 3.5]
+        # as stride = 16 -> [2.25, 4.6875, 4.75, 3.4375, 4.5, 9.125]
+        # as stride = 32 -> [4.4375, 3.4375, 6.0, 7.59375, 14.34375, 12.53125]
+        # ---------------------------------------------------------------------
+        self.masked_anchors = [(a_w / self.stride, a_h / self.stride, a) for a_w, a_h in self.anchors for a in
+                               self.angles]
+        self.reduction = "mean"
 
-        self.reduction = 'mean'
-        self.use_ciou_loss = True
-
-        self.obj_scale = 1
-        self.noobj_scale = 100
-        self.lambda_coord = 5
-        self.lambda_ciou_scale = 3.54
-        self.lambda_conf_scale = 64.3
-        self.lambda_cls_scale = 37.4
+        self.lambda_coord = 1.0
+        self.lambda_conf_scale = 10.0
+        self.lambda_cls_scale = 1.0
+        self.metrics = {}
 
     def build_targets(self, pred_boxes, pred_cls, target):
-
         ByteTensor = torch.cuda.ByteTensor if pred_boxes.is_cuda else torch.ByteTensor
         FloatTensor = torch.cuda.FloatTensor if pred_boxes.is_cuda else torch.FloatTensor
-
         nB, nA, nG, _, nC = pred_cls.size()
 
         # Output tensors
@@ -52,58 +57,72 @@ class YoloLayer(nn.Module):
         noobj_mask = ByteTensor(nB, nA, nG, nG).fill_(1)
         class_mask = FloatTensor(nB, nA, nG, nG).fill_(0)
         iou_scores = FloatTensor(nB, nA, nG, nG).fill_(0)
-        tx = FloatTensor(nB, nA, nG, nG).fill_(0)
-        ty = FloatTensor(nB, nA, nG, nG).fill_(0)
-        tw = FloatTensor(nB, nA, nG, nG).fill_(0)
-        th = FloatTensor(nB, nA, nG, nG).fill_(0)
+        skew_iou = FloatTensor(nB, nA, nG, nG).fill_(0)
+        ciou_loss = FloatTensor(nB, nA, nG, nG).fill_(0)
+        ta = FloatTensor(nB, nA, nG, nG).fill_(0)
         tcls = FloatTensor(nB, nA, nG, nG, nC).fill_(0)
 
-        # Convert to position relative to box
-        pred_boxes = pred_boxes * nG
-        target_boxes = target[:, 2:6] * nG
+        # Convert ground truth position to position that relative to the size of box (grid size)
+        target_boxes = torch.cat((target[:, 2:6] * nG, target[:, 6:]), dim=-1)
         gxy = target_boxes[:, :2]
-        gwh = target_boxes[:, 2:]
-        # Get anchors with best iou
-        ious = torch.stack([anchor_wh_iou(anchor, gwh) for anchor in self.masked_anchors])
-        best_ious, best_n = ious.max(0)
+        gwh = target_boxes[:, 2:4]
+        ga = target_boxes[:, 4]
+
+        # Get anchors with best iou and their angle difference with ground truths
+        arious = []
+        offset = []
+        for anchor in self.masked_anchors:
+            ariou = anchor_wh_iou(anchor[:2], gwh)
+            cos = torch.abs(torch.cos(torch.sub(anchor[2], ga)))
+            arious.append(ariou * cos)
+            offset.append(torch.abs(torch.sub(anchor[2], ga)))
+        arious = torch.stack(arious)
+        offset = torch.stack(offset)
+
+        best_ious, best_n = arious.max(0)
+
         # Separate target values
         b, target_labels = target[:, :2].long().t()
-        gx, gy = gxy.t()
-        gw, gh = gwh.t()
         gi, gj = gxy.long().t()
-        # Set masks
+
+        # Set masks to specify object's location
         obj_mask[b, best_n, gj, gi] = 1
         noobj_mask[b, best_n, gj, gi] = 0
-        tconf = obj_mask.float()
 
         # Set noobj mask to zero where iou exceeds ignore threshold
-        for i, anchor_ious in enumerate(ious.t()):
-            noobj_mask[b[i], anchor_ious > self.ignore_thresh, gj[i], gi[i]] = 0
-        # Coordinates
-        tx[b, best_n, gj, gi] = gx - gx.floor()
-        ty[b, best_n, gj, gi] = gy - gy.floor()
-        # Width and height
-        tw[b, best_n, gj, gi] = torch.log(gw / self.masked_anchors[best_n][:, 0] + 1e-16)
-        th[b, best_n, gj, gi] = torch.log(gh / self.masked_anchors[best_n][:, 1] + 1e-16)
+        for i, (anchor_ious, angle_offset) in enumerate(zip(arious.t(), offset.t())):
+            noobj_mask[b[i], (anchor_ious > self.ignore_thresh), gj[i], gi[i]] = 0
+            # if iou is greater than 0.4 and the angle offset if smaller than 15 degrees then ignore training
+            noobj_mask[b[i], (anchor_ious > 0.4) & (angle_offset < (np.pi / 12)), gj[i], gi[i]] = 0
+
+        # Angle (encode)
+        ta[b, best_n, gj, gi] = ga - self.masked_anchors[best_n][:, 2]
+
         # One-hot encoding of label
         tcls[b, best_n, gj, gi, target_labels] = 1
+        tconf = obj_mask.float()
+
+        # Calculate ciou loss
+        iou, ciou = bbox_xywha_ciou(pred_boxes[b, best_n, gj, gi], target_boxes)
+        with torch.no_grad():
+            img_size = self.stride * nG
+            bbox_loss_scale = 2.0 - 1.0 * gwh[:, 0] * gwh[:, 1] / (img_size ** 2)
+        ciou = bbox_loss_scale * (1.0 - ciou)
+
         # Compute label correctness and iou at best anchor
         class_mask[b, best_n, gj, gi] = (pred_cls[b, best_n, gj, gi].argmax(-1) == target_labels).float()
-
-        iou, ciou_loss = bbox_xywh_ciou(pred_boxes[b, best_n, gj, gi], target_boxes)
-
         iou_scores[b, best_n, gj, gi] = iou
-        ciou_loss = (1.0 - ciou_loss)
 
-        if self.reduction == 'mean':
-            ciou_loss = ciou_loss.mean()
-        else:
-            ciou_loss = ciou_loss.sum()
+        # magnitude for reg loss
+        skew_iou[b, best_n, gj, gi] = torch.exp(1 - iou) - 1
+
+        # unit vector for reg loss
+        ciou_loss[b, best_n, gj, gi] = ciou
 
         obj_mask = obj_mask.type(torch.bool)
         noobj_mask = noobj_mask.type(torch.bool)
 
-        return iou_scores, ciou_loss, class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf
+        return iou_scores, skew_iou, ciou_loss, class_mask, obj_mask, noobj_mask, ta, tcls, tconf
 
     def forward(self, output, target=None):
         # anchors = [12, 16, 19, 36, 40, 28, 36, 75, 76, 55, 72, 146, 142, 110, 192, 243, 459, 401]
@@ -119,16 +138,17 @@ class YoloLayer(nn.Module):
 
         # prediction.shape-> torch.Size([1, num_anchors, grid_size, grid_size, num_classes + 5])
         prediction = (
-            output.view(batch_size, self.num_anchors, self.num_classes + 5, grid_size, grid_size)
-                  .permute(0, 1, 3, 4, 2).contiguous()
+            output.view(batch_size, self.num_anchors, self.num_classes + 6, grid_size, grid_size)
+                .permute(0, 1, 3, 4, 2).contiguous()
         )
 
         pred_x = torch.sigmoid(prediction[..., 0]) * self.scale_x_y - (self.scale_x_y - 1) / 2
         pred_y = torch.sigmoid(prediction[..., 1]) * self.scale_x_y - (self.scale_x_y - 1) / 2
         pred_w = prediction[..., 2]
         pred_h = prediction[..., 3]
-        pred_conf = torch.sigmoid(prediction[..., 4])
-        pred_cls = torch.sigmoid(prediction[..., 5:])
+        pred_a = prediction[..., 4]
+        pred_conf = torch.sigmoid(prediction[..., 5])
+        pred_cls = torch.sigmoid(prediction[..., 6:])
 
         # grid.shape-> [1, 1, 52, 52, 1]
         # 預測出來的(pred_x, pred_y)是相對於每個cell左上角的點，因此這邊需要由左上角往右下角配合grid_size加上對應的offset，畫出的圖才會在正確的位置上
@@ -136,21 +156,22 @@ class YoloLayer(nn.Module):
         grid_y = torch.arange(grid_size).repeat(grid_size, 1).t().view([1, 1, grid_size, grid_size]).type(FloatTensor)
 
         # anchor.shape-> [1, 3, 1, 1, 1]
-        # 這邊我認為是要從anchors的大小來還原實際上的寬和高
         self.masked_anchors = FloatTensor(self.masked_anchors)
         anchor_w = self.masked_anchors[:, 0].view([1, self.num_anchors, 1, 1])
         anchor_h = self.masked_anchors[:, 1].view([1, self.num_anchors, 1, 1])
+        anchor_a = self.masked_anchors[:, 2].view([1, self.num_anchors, 1, 1])
 
-        # add offset and then normalize to 0~1
-        pred_boxes = FloatTensor(prediction[..., :4].shape)
-        pred_boxes[..., 0] = (pred_x + grid_x) / grid_size
-        pred_boxes[..., 1] = (pred_y + grid_y) / grid_size
-        pred_boxes[..., 2] = (torch.exp(pred_w) * anchor_w) / grid_size
-        pred_boxes[..., 3] = (torch.exp(pred_h) * anchor_h) / grid_size
+        # decode
+        pred_boxes = FloatTensor(prediction[..., :5].shape)
+        pred_boxes[..., 0] = (pred_x + grid_x)
+        pred_boxes[..., 1] = (pred_y + grid_y)
+        pred_boxes[..., 2] = (torch.exp(pred_w) * anchor_w)
+        pred_boxes[..., 3] = (torch.exp(pred_h) * anchor_h)
+        pred_boxes[..., 4] = pred_a + anchor_a
 
         output = torch.cat(
             (
-                pred_boxes.view(batch_size, -1, 4),
+                torch.cat([pred_boxes[..., :4] * self.stride, pred_boxes[..., 4:]], dim=-1).view(batch_size, -1, 5),
                 pred_conf.view(batch_size, -1, 1),
                 pred_cls.view(batch_size, -1, self.num_classes),
             ),
@@ -160,39 +181,58 @@ class YoloLayer(nn.Module):
         if target is None:
             return output, 0
         else:
-            iou_scores, ciou_loss, class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf = self.build_targets(
+            iou_scores, skew_iou, ciou_loss, class_mask, obj_mask, noobj_mask, ta, tcls, tconf = self.build_targets(
                 pred_boxes=pred_boxes, pred_cls=pred_cls, target=target
             )
+            # --------------------
+            # - Calculating Loss -
+            # --------------------
 
-            # Loss : Mask outputs to ignore non-existing objects (except with conf. loss)
-            loss_x = F.mse_loss(pred_x[obj_mask], tx[obj_mask], reduction=self.reduction)
-            loss_y = F.mse_loss(pred_y[obj_mask], ty[obj_mask], reduction=self.reduction)
-            loss_w = F.mse_loss(pred_w[obj_mask], tw[obj_mask], reduction=self.reduction)
-            loss_h = F.mse_loss(pred_h[obj_mask], th[obj_mask], reduction=self.reduction)
+            # Reg Loss for bounding box prediction
+            iou_const = skew_iou[obj_mask]
+            angle_loss = F.smooth_l1_loss(pred_a[obj_mask], ta[obj_mask], reduction="none")
+            reg_loss = angle_loss + ciou_loss[obj_mask]
+            with torch.no_grad():
+                reg_const = iou_const / reg_loss
+            reg_loss = (reg_loss * reg_const).mean()
 
-            #loss_conf_obj = F.binary_cross_entropy(pred_conf[obj_mask], tconf[obj_mask], reduction=self.reduction)
-            #loss_conf_noobj = F.binary_cross_entropy(pred_conf[noobj_mask], tconf[noobj_mask], reduction=self.reduction)
-            FOCAL = FocalLoss(FloatTensor)
-            loss_conf = (
+            # Focal Loss for object's prediction
+            FOCAL = FocalLoss(reduction=self.reduction)
+            conf_loss = (
                     FOCAL(pred_conf[obj_mask], tconf[obj_mask])
                     + FOCAL(pred_conf[noobj_mask], tconf[noobj_mask])
             )
-            loss_cls = F.binary_cross_entropy(pred_cls[obj_mask], tcls[obj_mask], reduction=self.reduction)
 
-            if self.use_ciou_loss:
-                #loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj
-                total_loss = (
-                    self.lambda_ciou_scale * ciou_loss +
-                    loss_conf +
-                    self.lambda_cls_scale * loss_cls
-                )
-                print("{}, {}, {}".format(self.lambda_ciou_scale * ciou_loss,
-                                          loss_conf,
-                                          self.lambda_cls_scale * loss_cls))
-            else:
-                loss_box = self.lambda_coord * (loss_x + loss_y + loss_w + loss_h)
-                #loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj
-                total_loss = loss_box + loss_conf + loss_cls
-                print("{}, {}, {}".format(loss_box, loss_conf, loss_cls))
+            # Binary Cross Entropy Loss for class' prediction
+            cls_loss = F.binary_cross_entropy(pred_cls[obj_mask], tcls[obj_mask], reduction=self.reduction)
 
-            return output, total_loss
+            # Loss scaling
+            reg_loss = self.lambda_coord * reg_loss
+            conf_loss = self.lambda_conf_scale * conf_loss
+            cls_loss = self.lambda_cls_scale * cls_loss
+            total_loss = reg_loss + conf_loss + cls_loss
+
+            # --------------------
+            # -   Logging Info   -
+            # --------------------
+            cls_acc = 100 * class_mask[obj_mask].mean()
+            conf50 = (pred_conf > 0.5).float()
+            iou50 = (iou_scores > 0.5).float()
+            iou75 = (iou_scores > 0.75).float()
+            detected_mask = conf50 * class_mask * tconf
+            precision = torch.sum(iou50 * detected_mask) / (conf50.sum() + 1e-16)
+            recall50 = torch.sum(iou50 * detected_mask) / (obj_mask.sum() + 1e-16)
+            recall75 = torch.sum(iou75 * detected_mask) / (obj_mask.sum() + 1e-16)
+
+            self.metrics = {
+                "loss": to_cpu(total_loss).item(),
+                "reg_loss": to_cpu(reg_loss).item(),
+                "conf_loss": to_cpu(conf_loss).item(),
+                "cls_loss": to_cpu(cls_loss).item(),
+                "cls_acc": to_cpu(cls_acc).item(),
+                "recall50": to_cpu(recall50).item(),
+                "recall75": to_cpu(recall75).item(),
+                "precision": to_cpu(precision).item(),
+            }
+
+            return output, total_loss * batch_size

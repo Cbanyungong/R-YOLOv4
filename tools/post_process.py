@@ -1,17 +1,48 @@
 import numpy as np
 import torch
+from tools.utils import skewiou
 
 
-def xywh2xyxy(x):
+def post_process(prediction, conf_thres=0.5, nms_thres=0.4):
     """
-    convert center coordinates, width and height to top left points and down right points
+    Args:
+        prediction: size-> [batch, ((grid x grid) + (grid x grid) + (grid x grid)) x num_anchors, 8]
+                    ex: [1, ((52 x 52) + (26 x 26) + (13 x 13)) x 18, 8] in my case
+                    last dimension-> [x, y, w, h, a, conf, num_classes]
+    Returns:
+        (x1, y1, x2, y2, object_conf, class_score, class_pred)
     """
-    y = torch.empty(x.shape)
-    y[..., 0] = x[..., 0] - x[..., 2] / 2
-    y[..., 1] = x[..., 1] - x[..., 3] / 2
-    y[..., 2] = x[..., 0] + x[..., 2] / 2
-    y[..., 3] = x[..., 1] + x[..., 3] / 2
-    return y
+    output = [None for _ in range(len(prediction))]
+    for batch, image_pred in enumerate(prediction):
+        # Filter out confidence scores below threshold
+        image_pred = image_pred[image_pred[:, 5] >= conf_thres]
+        # If none are remaining => process next image
+        if not image_pred.size(0):
+            continue
+        # Object confidence times class confidence
+        score = image_pred[:, 5] * image_pred[:, 6:].max(1)[0]
+        # Sort by it
+        image_pred = image_pred[(-score).argsort()]
+        class_confs, class_preds = image_pred[:, 6:].max(1, keepdim=True)  # class_preds-> index of classes
+        detections = torch.cat((image_pred[:, :6], class_confs.float(), class_preds.float()), 1)
+
+        # non-maximum suppression
+        keep_boxes = []
+        labels = detections[:, -1].unique()
+        for label in labels:
+            detect = detections[detections[:, -1] == label]
+            while len(detect):
+                large_overlap = skewiou(detect[0, :5], detect[:, :5]) > nms_thres
+                # Indices of boxes with lower confidence scores, large IOUs and matching labels
+                weights = detect[large_overlap, 5:6]
+                # Merge overlapping bboxes by order of confidence
+                detect[0, :4] = (weights * detect[large_overlap, :4]).sum(0) / weights.sum()
+                keep_boxes += [detect[0].detach()]
+                detect = detect[~large_overlap]
+            if keep_boxes:
+                output[batch] = torch.stack(keep_boxes)
+
+    return output
 
 
 def diou(box1, box2):
@@ -46,82 +77,3 @@ def diou(box1, box2):
     diou = center_distance / c_square
 
     return iou - diou
-
-
-def nms(boxes, confs, nms_thresh=0.5):
-    """
-    :param boxes: boxes that overlap and have the same label should be eliminated
-    :param confs: predicted confidences of those boxes
-    :param nms_thresh: nms threshold
-    :return:
-    """
-    confs = np.squeeze(confs)
-    order = np.argsort(confs)
-
-    # nms algorithm
-    keep = []
-    while len(order) > 0:
-        first_box_index, order = order[-1], order[:-1]
-        box = boxes[first_box_index]
-
-        # box looks like-> [(0, array([0.18615767, 0.22766608, 0.748049  , 0.7332627 ], dtype=float32)),
-        #                   (1, array([0.19176558, 0.23242362, 0.73947287, 0.7266734 ], dtype=float32)), ...
-        keep.append(first_box_index)
-        box_order_that_can_be_kept = []
-        for b in order:
-            if diou(box, boxes[b]) < nms_thresh:
-                box_order_that_can_be_kept.append(b)
-
-        order = box_order_that_can_be_kept
-
-    return np.array(keep)
-
-
-def process(prediction, conf_thresh, nms_thresh):
-    # 416 / 8, 16, 32 -> 52, 26, 13
-    # box_array.shape-> [batch,  ((52 x 52) + (26 x 26) + (13 x 13)) x 3, 4]
-    # confs.shape-> [batch,  ((52 x 52) + (26 x 26) + (13 x 13)) x 3, num_classes]
-    prediction[..., :4] = xywh2xyxy(prediction[..., :4])
-    box_array = prediction[..., :4].detach().cpu().numpy()
-    confs = prediction[..., 4:5].detach() * prediction[..., 5:].detach()
-    batch_size = len(prediction)
-
-    _, test_id = torch.max(prediction[..., 4:5].detach(), dim=1, keepdim=True)
-
-    # [batch, num, num_classes] --> [batch, num]
-    # torch.max returns a namedtuple (values, indices) where values is the maximum value of each row of the
-    # input tensor in the given dimension dim. And indices is the index location of each maximum value found (argmax).
-    max_conf, max_id = torch.max(confs, dim=2, keepdim=True)
-    max_conf, max_id = max_conf.cpu().numpy(), max_id.cpu().numpy()
-
-    bboxes_batch = []
-    for i in range(batch_size):
-        # Thresholding by Object Confidence
-        # squeeze的原因是要讓shape-> (n, 1) 變成 shape-> (n)
-        argwhere = np.squeeze(max_conf[i] > conf_thresh)
-        box_candidate = box_array[i, argwhere, :]  # 信心值有大於門檻的bounding box
-        confs_candidate = max_conf[i, argwhere]  # 這些bounding box的信心值
-        classes_label = max_id[i, argwhere]  # 這些bounding box對應到的label
-        classes = np.unique(classes_label)
-
-        bboxes = []
-        # nms for candidate classes
-        for j in classes:
-            cls_argwhere = np.squeeze(classes_label == j, axis=1)  # axis=1 lets [[True]] -> [True] instead of -> True
-            bbox = box_candidate[cls_argwhere, :]
-            confs = confs_candidate[cls_argwhere]
-            label = classes_label[cls_argwhere]
-
-            keep = nms(bbox, confs, nms_thresh)
-
-            if keep.size > 0:
-                bbox = bbox[keep, :]
-                confs = confs[keep]
-                label = label[keep]
-
-                for k in range(bbox.shape[0]):
-                    bboxes.append([bbox[k, 0], bbox[k, 1], bbox[k, 2], bbox[k, 3], confs[k], label[k]])
-
-        bboxes_batch.append(bboxes)
-
-    return bboxes_batch
