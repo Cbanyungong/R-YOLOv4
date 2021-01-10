@@ -13,14 +13,14 @@ Though it provides theta for each bounding box, it is not within the angle range
 
 ### Loss Function
 
-<img src="./images/loss.png" alt="loss" height="50"/>
-<img src="./images/angle.png" alt="angle" height="50"/>
+<img src="./images/loss.png" alt="loss" height="80"/>
+<img src="./images/angle.png" alt="angle" height="80"/>
 
 I implemented the loss function proposed by [R3Det: Refined Single-Stage Detector with Feature Refinement for Rotating Object](https://arxiv.org/abs/1908.05612) and made some adjustment for myself.
 
 ### Recall
 
-<img src="./images/recall.png" alt="recall" height="50"/>
+<img src="./images/recall.png" alt="recall" height="100"/>
 
 As the paper suggested, I get a better results from **f(ariou) = exp(1-ariou)-1**. Therefore I used it for my loss function.
 
@@ -88,8 +88,8 @@ R-YOLOv4/
 * Dataset
 I have  provided some datasets example on my github. Still, you have to download the others by yourself and arrange it in the correct directories like I do.
 * Weights
-[yolov4 pretrained weights](https://drive.google.com/uc?export=download&id=1UDp_DB2gbPSzBIpgAJuLIFqu8hgl57Ip)
-[UCAS-AOD weights](https://drive.google.com/uc?export=download&id=1sVD2d_y9VDirA-XOdcVDKCDrQw3e7ZJY) (weights that I have already trainned for this dataset)
+[yolov4 pretrained weights](https://drive.google.com/uc?export=download&id=1UDp_DB2gbPSzBIpgAJuLIFqu8hgl57Ip) </br>
+[UCAS-AOD weights](https://drive.google.com/uc?export=download&id=1sVD2d_y9VDirA-XOdcVDKCDrQw3e7ZJY) (weights that I have already trained for this dataset)
 
 
 ### Train
@@ -138,13 +138,13 @@ usage: detect.py [-h] [--image_folder IMAGE_FOLDER] [--weights_path WEIGHTS_PATH
                  [--conf_thres CONF_THRES] [--nms_thres NMS_THRES] [--batch_size BATCH_SIZE] [--img_size IMG_SIZE]
 ```
 
-<img src="./outputs/P0292.png" alt="car" height="50"/>
-<img src="./outputs/P0259.png" alt="plane" height="50"/>
+<img src="./outputs/P0292.png" alt="car" height="100"/>
+<img src="./outputs/P0259.png" alt="plane" height="100"/>
 
 
 ### References
-[yangxue0827/RotationDetection](https://github.com/yangxue0827/RotationDetection)
-[eriklindernoren/PyTorch-YOLOv3](https://github.com/eriklindernoren/PyTorch-YOLOv3)
+[yangxue0827/RotationDetection](https://github.com/yangxue0827/RotationDetection) </br>
+[eriklindernoren/PyTorch-YOLOv3](https://github.com/eriklindernoren/PyTorch-YOLOv3) </br>
 [Tianxiaomo/pytorch-YOLOv4](https://github.com/Tianxiaomo/pytorch-YOLOv4)
 
 
