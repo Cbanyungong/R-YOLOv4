@@ -20,7 +20,7 @@ I implemented the loss function proposed by [R3Det: Refined Single-Stage Detecto
 
 ### Recall
 
-<img src="./images/recall.png" alt="recall" height="100"/>
+<img src="./images/recall.png" alt="recall" height="200"/>
 
 As the paper suggested, I get a better results from **f(ariou) = exp(1-ariou)-1**. Therefore I used it for my loss function.
 
@@ -138,8 +138,8 @@ usage: detect.py [-h] [--image_folder IMAGE_FOLDER] [--weights_path WEIGHTS_PATH
                  [--conf_thres CONF_THRES] [--nms_thres NMS_THRES] [--batch_size BATCH_SIZE] [--img_size IMG_SIZE]
 ```
 
-<img src="./outputs/P0292.png" alt="car" height="100"/>
-<img src="./outputs/P0259.png" alt="plane" height="100"/>
+<img src="./outputs/P0292.png" alt="car" height="200"/>
+<img src="./outputs/P0259.png" alt="plane" height="200"/>
 
 
 ### References
