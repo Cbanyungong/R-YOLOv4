@@ -138,8 +138,8 @@ usage: detect.py [-h] [--image_folder IMAGE_FOLDER] [--weights_path WEIGHTS_PATH
                  [--conf_thres CONF_THRES] [--nms_thres NMS_THRES] [--batch_size BATCH_SIZE] [--img_size IMG_SIZE]
 ```
 
-<img src="./outputs/P0292.png" alt="car" height="350"/>
-<img src="./outputs/P0259.png" alt="plane" height="350"/>
+<img src="./outputs/P0292.png" alt="car" height="400"/>
+<img src="./outputs/P0259.png" alt="plane" height="390"/>
 
 
 ### References
