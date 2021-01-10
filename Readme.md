@@ -4,4 +4,4 @@ This is a PyTorch-based R-YOLOv4 implementation which combine YOLOv4 model and l
 
 
 
-![](https://github.com/kkkunnnnethan/R-YOLOv4/blob/master/images/angle.png)
+![](https://github.com/kkkunnnnethan/R-YOLOv4/blob/master/images/angle.png=50px)
