@@ -30,8 +30,7 @@ def init():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train_folder", type=str, default="data/test2", help="path to dataset")
-    parser.add_argument("--test_folder", type=str, default="data/test", help="path to dataset")
+    parser.add_argument("--train_folder", type=str, default="data/train_800", help="path to dataset")
     parser.add_argument("--weights_path", type=str, default="weights/yolov4_kun.pth", help="path to weights file")
     parser.add_argument("--class_path", type=str, default="data/coco.names", help="path to class label file")
     parser.add_argument("--epochs", type=int, default=10, help="number of epochs")
@@ -82,7 +81,6 @@ if __name__ == "__main__":
         start_time = time.time()
         print("\n---- [Epoch %d/%d] ----\n" % (epoch + 1, args.epochs))
         model.train()
-        print("len:", len(train_dataloader))
 
         for batch, (_, imgs, targets) in enumerate(train_dataloader):
             global_step = num_iters_per_epoch * epoch + batch + 1

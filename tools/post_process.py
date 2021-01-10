@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 from tools.utils import skewiou
 
@@ -43,37 +42,3 @@ def post_process(prediction, conf_thres=0.5, nms_thres=0.4):
                 output[batch] = torch.stack(keep_boxes)
 
     return output
-
-
-def diou(box1, box2):
-    """
-    calculates iou for two boxes
-    """
-    # iou
-    t1_x1, t1_y1, t1_x2, t1_y2 = box1
-    t2_x1, t2_y1, t2_x2, t2_y2 = box2
-
-    # 不知道為什麼有些值真的會小於0
-    if t1_x1 < 0 or t1_x2 < 0 or t1_y1 < 0 or t1_y2 < 0 or t2_x1 < 0 or t2_x2 < 0 or t2_y1 < 0 or t2_y2 < 0:
-        return 1
-
-    interX = min(t1_x2, t2_x2) - max(t1_x1, t2_x1)
-    interY = min(t1_y2, t2_y2) - max(t1_y1, t2_y1)
-
-    if interX <= 0 or interY <= 0:
-        return 0.0
-
-    inter_area = interX * interY
-    union_area = (t1_x2 - t1_x1) * (t1_y2 - t1_y1) + (t2_x2 - t2_x1) * (t2_y2 - t2_y1) - inter_area + 1e-16
-    iou = inter_area / union_area
-
-    # diou
-    center_x1, center_y1 = (t1_x1 + t1_x2) / 2, (t1_y1 + t1_y2) / 2
-    center_x2, center_y2 = (t2_x1 + t2_x2) / 2, (t2_y1 + t2_y2) / 2
-    outerX_square = pow(min(t1_x1, t2_x1) - max(t1_x2, t2_x2), 2)
-    outerY_square = pow(min(t1_y1, t2_y1) - max(t1_y2, t2_y2), 2)
-    c_square = outerX_square + outerY_square
-    center_distance = pow(center_x1 - center_x2, 2) + pow(center_y1 - center_y2, 2)
-    diou = center_distance / c_square
-
-    return iou - diou

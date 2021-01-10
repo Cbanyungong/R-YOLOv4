@@ -12,7 +12,7 @@ from model.model import Yolo
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--test_folder", type=str, default="data/test_200", help="path to dataset")
+    parser.add_argument("--test_folder", type=str, default="data/test3", help="path to dataset")
     parser.add_argument("--weights_path", type=str, default="weights/AOD_800.pth", help="path to weights file")
     parser.add_argument("--class_path", type=str, default="data/coco.names", help="path to class label file")
     parser.add_argument("--conf_thres", type=float, default=0.7, help="object confidence threshold")
@@ -35,7 +35,7 @@ if __name__ == "__main__":
     model.eval()
 
     # Get dataloader
-    train_dataset, train_dataloader = split_data(args.test_folder, args.img_size,
+    train_dataset, train_dataloader = split_data(args.test_folder, args.img_size, args.batch_size,
                                                  shuffle=False, augment=False, multiscale=False)
 
     print("Compute mAP...")
