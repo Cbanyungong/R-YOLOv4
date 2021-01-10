@@ -30,14 +30,14 @@ def init():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train_folder", type=str, default="data/train_800", help="path to dataset")
+    parser.add_argument("--train_folder", type=str, default="data/train", help="path to dataset")
     parser.add_argument("--weights_path", type=str, default="weights/yolov4_kun.pth", help="path to weights file")
     parser.add_argument("--class_path", type=str, default="data/coco.names", help="path to class label file")
     parser.add_argument("--epochs", type=int, default=10, help="number of epochs")
     parser.add_argument("--lr", type=float, default=0.001, help="learning rate")
     parser.add_argument("--batch_size", type=int, default=4, help="size of batches")
     parser.add_argument("--subdivisions", type=int, default=4, help="size of mini batches")
-    parser.add_argument("--img_size", type=int, default=416, help="size of each image dimension")
+    parser.add_argument("--img_size", type=int, default=608, help="size of each image dimension")
     args = parser.parse_args()
     print(args)
 

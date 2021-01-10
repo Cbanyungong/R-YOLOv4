@@ -10,7 +10,7 @@ from model.model import Yolo
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--image_folder", type=str, default="data/demo", help="path to dataset")
+    parser.add_argument("--image_folder", type=str, default="data/detect", help="path to dataset")
     parser.add_argument("--weights_path", type=str, default="weights/AOD_800.pth", help="path to weights file")
     parser.add_argument("--class_path", type=str, default="data/coco.names", help="path to class label file")
     parser.add_argument("--conf_thres", type=float, default=0.7, help="object confidence threshold")
@@ -18,6 +18,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
     parser.add_argument("--img_size", type=int, default=608, help="size of each image dimension")
     args = parser.parse_args()
+    print(args)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
