@@ -139,7 +139,7 @@ usage: detect.py [-h] [--image_folder IMAGE_FOLDER] [--weights_path WEIGHTS_PATH
 ```
 
 <img src="./outputs/P0292.png" alt="car" height="430"/>
-<img src="./outputs/P0259.png" alt="plane" height="410"/>
+<img src="./outputs/P0259.png" alt="plane" height="413"/>
 
 
 ### References
