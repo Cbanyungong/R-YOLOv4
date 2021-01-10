@@ -16,7 +16,7 @@ Though it provides theta for each bounding box, it is not within the angle range
 <img src="./images/loss.png" alt="loss" height="90"/>
 <img src="./images/angle.png" alt="angle" height="70"/>
 
-I implemented the loss function proposed by [R3Det: Refined Single-Stage Detector with Feature Refinement for Rotating Object](https://arxiv.org/abs/1908.05612) and made some adjustment for myself.
+I implemented the loss function proposed by [R3Det: Refined Single-Stage Detector with Feature Refinement for Rotating Object](https://arxiv.org/abs/1908.05612) and made some adjustments for myself.
 
 ### Recall
 
@@ -42,7 +42,7 @@ I have  provided some datasets example on my github. Still, you have to download
 [yolov4 pretrained weights](https://drive.google.com/uc?export=download&id=1UDp_DB2gbPSzBIpgAJuLIFqu8hgl57Ip) </br>
 [UCAS-AOD weights](https://drive.google.com/uc?export=download&id=1sVD2d_y9VDirA-XOdcVDKCDrQw3e7ZJY) (weights that I have already trained for this dataset)
 
-3. Make sure your files arrangment look like the following
+3. Make sure your files arrangment looks like the following
 ```
 R-YOLOv4/
 ├── train.py
